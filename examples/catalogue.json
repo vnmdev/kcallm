@@ -1,0 +1,87 @@
+[
+  {
+    "name": "Demo mango pack",
+    "brand": "Example only",
+    "category": "Demo",
+    "preparation": "Synthetic software fixture, not verified nutrition",
+    "aliases": [
+      "demo mango",
+      "mango packs"
+    ],
+    "basis_amount": "1",
+    "basis_unit": "pack",
+    "nutrients": {
+      "kcal": "125",
+      "protein": "1.7",
+      "carbohydrates": "25",
+      "fat": "1.4",
+      "saturates": "0.5",
+      "sugars": "22.4",
+      "fibre": "2.6",
+      "salt": "0.02"
+    },
+    "conversions": [],
+    "usual_serving": {
+      "quantity": "1",
+      "unit": "pack"
+    }
+  },
+  {
+    "name": "Demo potato",
+    "brand": "Example only",
+    "category": "Demo",
+    "preparation": "Synthetic software fixture, not verified nutrition",
+    "aliases": [
+      "demo potatoes"
+    ],
+    "basis_amount": "100",
+    "basis_unit": "g",
+    "nutrients": {
+      "kcal": "107",
+      "protein": "2.5",
+      "carbohydrates": "22.6",
+      "fat": "0.2",
+      "saturates": "0.1",
+      "sugars": "1.4",
+      "fibre": "2.6",
+      "salt": "0"
+    },
+    "conversions": [
+      {
+        "unit": "piece",
+        "amount": "1",
+        "basis_amount": "200"
+      }
+    ],
+    "usual_serving": null
+  },
+  {
+    "name": "Demo cottage cheese",
+    "brand": "Example only",
+    "category": "Demo",
+    "preparation": "Synthetic software fixture, not verified nutrition",
+    "aliases": [
+      "demo cheese"
+    ],
+    "basis_amount": "100",
+    "basis_unit": "g",
+    "nutrients": {
+      "kcal": "102",
+      "protein": "10.3",
+      "carbohydrates": "3.1",
+      "fat": "5.4",
+      "saturates": "3.2",
+      "sugars": "2.9",
+      "fibre": "0",
+      "salt": "0.39"
+    },
+    "conversions": [
+      {
+        "unit": "pot",
+        "amount": "1",
+        "basis_amount": "300"
+      }
+    ],
+    "usual_serving": null
+  }
+]

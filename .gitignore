@@ -1,0 +1,31 @@
+.venv/
+.tools/
+.cache/
+.data/
+.private/
+.env
+*.sqlite*
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+frontend/node_modules/
+frontend/dist/
+artifacts/
+.DS_Store
+playwright-report/
+test-results/
+
+# Personal working notes, learning material and agent handoffs (kept locally)
+AGENTS.md
+HANDOFF.md
+docs/
+
+# Homelab-specific deployment config (kept locally)
+deploy/compose.*.yaml
+deploy/tailscale/
+
+# Build output
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
