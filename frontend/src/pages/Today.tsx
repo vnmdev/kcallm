@@ -518,33 +518,47 @@ export default function Today({
               <Sparkles size={14} />
               Interpret with
             </span>
-            <select
-              aria-label="AI provider for this entry"
-              value={draft.provider}
-              onChange={(event) =>
-                void switchProvider(event.target.value as Provider)
-              }
-              disabled={locked}
-            >
-              <option value="chatgpt">ChatGPT</option>
-              <option value="llama">llama.cpp</option>
-            </select>
-            <button
-              className="model-label"
-              onClick={onSettings}
-              title={draft.model || "Choose a model in Settings"}
-            >
-              {draft.model || "Choose model"}
-              <ArrowRight size={12} />
-            </button>
+            {ai.demo ? (
+              <span className="model-label" title={ai.model}>
+                the demo’s hosted model
+              </span>
+            ) : (
+              <>
+                <select
+                  aria-label="AI provider for this entry"
+                  value={draft.provider}
+                  onChange={(event) =>
+                    void switchProvider(event.target.value as Provider)
+                  }
+                  disabled={locked}
+                >
+                  <option value="chatgpt">ChatGPT</option>
+                  <option value="llama">llama.cpp</option>
+                </select>
+                <button
+                  className="model-label"
+                  onClick={onSettings}
+                  title={draft.model || "Choose a model in Settings"}
+                >
+                  {draft.model || "Choose model"}
+                  <ArrowRight size={12} />
+                </button>
+              </>
+            )}
           </div>
-          {draft.provider === "chatgpt" && (
+          {ai.demo && (
+            <p className="privacy-note">
+              Demo: your text or photo is sent to a hosted AI model. Please
+              don’t enter personal information.
+            </p>
+          )}
+          {!ai.demo && draft.provider === "chatgpt" && (
             <p className="privacy-note">
               Your text, photo and food catalogue are sent to ChatGPT when you
               interpret.
             </p>
           )}
-          {draft.provider === "llama" && (
+          {!ai.demo && draft.provider === "llama" && (
             <p className="privacy-note">
               Your input is sent only to your configured llama.cpp endpoint.
             </p>

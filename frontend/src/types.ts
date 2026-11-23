@@ -100,6 +100,8 @@ export type AIStatus = {
   llama_base_url: string;
   providers: { id: Provider; connected: boolean; message: string }[];
   auth_pending: boolean;
+  /** True on the public demo: one hosted model, fixed settings, no ChatGPT sign-in. */
+  demo?: boolean;
 };
 export type AIModel = { id: string; name: string; input_modalities: string[] };
 export type ProposedLine = {

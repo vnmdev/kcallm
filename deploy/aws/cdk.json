@@ -1,0 +1,9 @@
+{
+  "app": "uv run --no-project --with 'aws-cdk-lib>=2.200,<3' --with 'constructs>=10,<11' python app.py",
+  "context": {
+    "region": "eu-north-1",
+    "domain": "kcallm.vnmdev.com",
+    "base_url": "https://openrouter.ai/api/v1",
+    "instance_type": "t4g.micro"
+  }
+}

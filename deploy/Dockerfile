@@ -13,9 +13,11 @@ ENV UV_PYTHON_DOWNLOADS=never \
     PYTHONUNBUFFERED=1 \
     KCALLM_DATA_DIR=/data \
     KCALLM_PRIVATE_DIR=/private \
-    KCALLM_FRONTEND_DIR=/app/frontend/dist
+    KCALLM_FRONTEND_DIR=/app/frontend/dist \
+    KCALLM_DEMO_SEED=/app/examples/demo-seed.json
 COPY pyproject.toml uv.lock ./
 COPY backend/ ./backend/
+COPY examples/demo-seed.json ./examples/demo-seed.json
 RUN uv sync --frozen --no-dev --no-editable \
     && mkdir -p /data /private \
     && chown 1000:100 /data /private
