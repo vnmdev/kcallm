@@ -6,7 +6,9 @@ cd "$(dirname "$0")"
 MODEL="${1:?usage: deploy.sh <provider/model-id>}"
 REGION="$(jq -r .context.region cdk.json)"
 
-aws ssm get-parameter --region "$REGION" --name /kcallm/demo/api-key >/dev/null \
+aws sts get-caller-identity >/dev/null 2>&1 \
+  || { echo "AWS sign-in missing or expired: run 'aws login --region $REGION'"; exit 1; }
+aws ssm get-parameter --region "$REGION" --name /kcallm/demo/api-key >/dev/null 2>&1 \
   || { echo "Create the API key first: see deploy/aws/README.md"; exit 1; }
 
 npx --yes aws-cdk@2 deploy --require-approval never -c model="$MODEL" --outputs-file cdk-outputs.json
