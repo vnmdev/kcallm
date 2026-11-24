@@ -31,6 +31,7 @@ import {
   type NutrientKey,
   type Preview,
   type Provider,
+  providerLabels,
   type Settings,
 } from "../types";
 
@@ -532,8 +533,19 @@ export default function Today({
                   }
                   disabled={locked}
                 >
-                  <option value="chatgpt">ChatGPT</option>
-                  <option value="llama">llama.cpp</option>
+                  {(Object.keys(providerLabels) as Provider[])
+                    .filter(
+                      (id) =>
+                        id !== "openrouter" ||
+                        ai.providers.some(
+                          (item) => item.id === id && item.connected,
+                        ),
+                    )
+                    .map((id) => (
+                      <option key={id} value={id}>
+                        {providerLabels[id]}
+                      </option>
+                    ))}
                 </select>
                 <button
                   className="model-label"
@@ -560,7 +572,13 @@ export default function Today({
           )}
           {!ai.demo && draft.provider === "llama" && (
             <p className="privacy-note">
-              Your input is sent only to your configured llama.cpp endpoint.
+              Your input is sent only to your configured custom endpoint.
+            </p>
+          )}
+          {!ai.demo && draft.provider === "openrouter" && (
+            <p className="privacy-note">
+              Your text, photo and food catalogue are sent to OpenRouter and the
+              chosen model’s provider when you interpret.
             </p>
           )}
           <div className="capture-actions">

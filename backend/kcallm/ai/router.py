@@ -112,11 +112,15 @@ class AIService:
                 "KCALLM_AI_TIMEOUT_SECONDS must be a number between 30 and 600.",
                 503,
             ) from exc
+        openrouter_key = os.getenv("KCALLM_OPENROUTER_API_KEY", "")
+        self.openrouter_enabled = bool(openrouter_key)
+        self.openrouter_model = os.getenv("KCALLM_OPENROUTER_MODEL", "openai/gpt-6-luna")
         self.providers = Providers(
             self.http,
             self.auth,
             os.getenv("KCALLM_LLAMA_API_KEY", ""),
             generation_timeout=generation_timeout,
+            openrouter_key=openrouter_key,
         )
         self.settings_lock = asyncio.Lock()
 
@@ -131,11 +135,14 @@ class AIService:
                 ),
             }
         saved = read_private_json(self.config_path)
+        # With an OpenRouter key on the server, a fresh install works out of the box.
+        default_provider = "openrouter" if self.openrouter_enabled else "chatgpt"
         return {
-            "provider": saved.get("provider", "chatgpt"),
+            "provider": saved.get("provider", default_provider),
             "models": {
                 "chatgpt": "",
                 "llama": "qwen-3.8-27b-vision-48k",
+                "openrouter": self.openrouter_model,
                 **saved.get("models", {}),
             },
             "llama_base_url": normalize_base_url(
@@ -152,9 +159,7 @@ class AIService:
                 "provider": "llama",
                 "model": self.demo.model,
                 "llama_base_url": "",
-                "providers": [
-                    {"id": "llama", "connected": True, "message": "Hosted demo model."}
-                ],
+                "providers": [{"id": "llama", "connected": True, "message": "Hosted demo model."}],
                 "auth_pending": False,
                 "demo": True,
             }
@@ -179,6 +184,15 @@ class AIService:
             "providers": [
                 {"id": "chatgpt", "connected": chatgpt_connected, "message": chatgpt_message},
                 {"id": "llama", "connected": llama_connected, "message": llama_message},
+                {
+                    "id": "openrouter",
+                    "connected": self.openrouter_enabled,
+                    "message": (
+                        "Hosted models through OpenRouter, using this server's API key."
+                        if self.openrouter_enabled
+                        else "Not configured: set KCALLM_OPENROUTER_API_KEY on the server."
+                    ),
+                },
             ],
             "auth_pending": self.auth.pending is not None,
             "demo": False,
@@ -205,6 +219,10 @@ class AIService:
             # Ignore any provider/model the browser asks for: the demo uses only its hosted model.
             return "llama", self.demo.model, settings["llama_base_url"]
         provider = request.provider or settings["provider"]
+        if provider == "openrouter" and not self.openrouter_enabled:
+            raise ProviderError(
+                "provider_not_configured", "OpenRouter is not configured on this server.", 503
+            )
         model = request.model.strip() if request.model else settings["models"][provider]
         if not model:
             raise ProviderError("model_required", "Choose a model in AI settings first.", 422)

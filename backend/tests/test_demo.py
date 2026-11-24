@@ -71,9 +71,7 @@ def test_restore_and_starter_drafts_are_disabled_in_demo(demo_env: Path) -> None
     response = client.post("/api/restore/preview", json={"data": export}, headers=headers)
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "demo_locked"
-    response = client.post(
-        "/api/restore", json={"data": export, "replace": True}, headers=headers
-    )
+    response = client.post("/api/restore", json={"data": export, "replace": True}, headers=headers)
     assert response.status_code == 403
     assert client.get("/api/starter-drafts").json() == []
 

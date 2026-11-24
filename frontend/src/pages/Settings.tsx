@@ -20,6 +20,7 @@ import {
   type AIStatus,
   type Provider,
   type Settings,
+  providerLabels,
 } from "../types";
 
 type Props = {
@@ -221,7 +222,16 @@ export default function SettingsPage({
 
   const chatgpt = ai.providers.find((item) => item.id === "chatgpt");
   const llama = ai.providers.find((item) => item.id === "llama");
+  const openrouter = ai.providers.find((item) => item.id === "openrouter");
   const selectedModel = models.find((item) => item.id === model);
+  // OpenRouter offers many models: typing in the Model box narrows the list below it.
+  const query = model.trim().toLowerCase();
+  const visibleModels =
+    query && !selectedModel
+      ? models.filter((item) =>
+          `${item.id} ${item.name}`.toLowerCase().includes(query),
+        )
+      : models;
 
   return (
     <div className="settings-page">
@@ -315,12 +325,27 @@ export default function SettingsPage({
           {ai.demo ? (
             <p className="section-copy">
               This public demo uses one hosted vision model ({ai.model}) with
-              per-visitor limits, so these settings are fixed. The full app
-              connects to a ChatGPT account or a local llama.cpp server.
+              per-visitor limits, so these settings are fixed. The full app uses
+              OpenRouter, a ChatGPT account or your own llama.cpp server.
             </p>
           ) : (
             <>
               <div className="connection-cards">
+                <div className="connection-card">
+                  <div className="connection-card-heading">
+                    <span className="provider-monogram">O</span>
+                    <strong>OpenRouter</strong>
+                    <span
+                      className={`connection-chip ${openrouter?.connected ? "connected" : ""}`}
+                    >
+                      {openrouter?.connected ? "Ready" : "Not configured"}
+                    </span>
+                  </div>
+                  <p>
+                    {openrouter?.message ||
+                      "Hosted models through OpenRouter, using this server's API key."}
+                  </p>
+                </div>
                 <div className="connection-card">
                   <div className="connection-card-heading">
                     <span className="provider-monogram">C</span>
@@ -366,10 +391,16 @@ export default function SettingsPage({
                     )}
                   </div>
                 </div>
+              </div>
+              <details
+                className="advanced-provider"
+                open={provider === "llama"}
+              >
+                <summary>Advanced: use your own model server</summary>
                 <div className="connection-card">
                   <div className="connection-card-heading">
                     <span className="provider-monogram llama-monogram">L</span>
-                    <strong>llama.cpp</strong>
+                    <strong>{providerLabels.llama}</strong>
                     <span
                       className={`connection-chip ${llama?.connected ? "connected" : ""}`}
                     >
@@ -381,26 +412,8 @@ export default function SettingsPage({
                       "Use your own OpenAI-compatible llama.cpp endpoint. Image support depends on its loaded model."}
                   </p>
                 </div>
-              </div>
-              <div className="form-stack">
                 <label>
-                  Default provider
-                  <select
-                    value={provider}
-                    onChange={(event) => {
-                      setProvider(event.target.value as Provider);
-                      setModel("");
-                      setModels([]);
-                      setModelsLoaded(false);
-                      setAIDirty(true);
-                    }}
-                  >
-                    <option value="chatgpt">ChatGPT</option>
-                    <option value="llama">llama.cpp</option>
-                  </select>
-                </label>
-                <label>
-                  llama.cpp base URL
+                  Endpoint base URL
                   <input
                     type="url"
                     value={endpoint}
@@ -414,6 +427,34 @@ export default function SettingsPage({
                     Save a changed endpoint before loading its models. API keys
                     are configured privately on the host.
                   </span>
+                </label>
+              </details>
+              <div className="form-stack">
+                <label>
+                  Default provider
+                  <select
+                    value={provider}
+                    onChange={(event) => {
+                      setProvider(event.target.value as Provider);
+                      setModel("");
+                      setModels([]);
+                      setModelsLoaded(false);
+                      setAIDirty(true);
+                    }}
+                  >
+                    {(Object.keys(providerLabels) as Provider[]).map((id) => (
+                      <option
+                        key={id}
+                        value={id}
+                        disabled={id === "openrouter" && !openrouter?.connected}
+                      >
+                        {providerLabels[id]}
+                        {id === "openrouter" && !openrouter?.connected
+                          ? " (not configured)"
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <div className="model-discovery">
                   <label>
@@ -449,9 +490,9 @@ export default function SettingsPage({
                   </button>
                 </div>
                 {modelsLoaded &&
-                  (models.length ? (
+                  (visibleModels.length ? (
                     <div className="model-options">
-                      {models.map((item) => (
+                      {visibleModels.map((item) => (
                         <button
                           key={item.id}
                           className={`model-option ${model === item.id ? "selected" : ""}`}
@@ -474,7 +515,9 @@ export default function SettingsPage({
                     </div>
                   ) : (
                     <p className="field-hint">
-                      The provider returned no available models.
+                      {models.length
+                        ? "No loaded model matches that name."
+                        : "The provider returned no available models."}
                     </p>
                   ))}
                 {selectedModel && (

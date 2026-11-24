@@ -93,7 +93,13 @@ export type Day = {
   remaining?: Nutrients;
 };
 export type Settings = { revision: number; timezone: string; goals: Nutrients };
-export type Provider = "chatgpt" | "llama";
+export type Provider = "chatgpt" | "llama" | "openrouter";
+/** Display order and names: OpenRouter first, your own endpoint last (an advanced option). */
+export const providerLabels: Record<Provider, string> = {
+  openrouter: "OpenRouter",
+  chatgpt: "ChatGPT",
+  llama: "Custom endpoint (llama.cpp)",
+};
 export type AIStatus = {
   provider: Provider;
   model: string;

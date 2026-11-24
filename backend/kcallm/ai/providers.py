@@ -59,6 +59,9 @@ def strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
 def llama_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Keep llama.cpp's grammar small; application validation remains authoritative.
 
@@ -139,10 +142,19 @@ class Providers:
         auth: ChatGPTAuth,
         llama_key: str = "",
         generation_timeout: float = 180,
+        openrouter_key: str = "",
+        openrouter_base_url: str = OPENROUTER_BASE_URL,
     ) -> None:
         self.http = http
         self.auth = auth
         self.llama_headers = {"Authorization": f"Bearer {llama_key}"} if llama_key else {}
+        # The OpenRouter key is only ever sent to OpenRouter, never to a user-entered endpoint.
+        self.openrouter_base_url = openrouter_base_url
+        self.openrouter_headers = (
+            {"Authorization": f"Bearer {openrouter_key}", "X-Title": "KcaLLM"}
+            if openrouter_key
+            else {}
+        )
         self.generation_timeout = generation_timeout
 
     async def models(self, provider: str, llama_base_url: str) -> list[dict[str, Any]]:
@@ -153,6 +165,18 @@ class Providers:
                 "GET",
                 f"{RESOURCE}/models",
                 headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+        elif provider == "openrouter":
+            if not self.openrouter_headers:
+                raise ProviderError(
+                    "provider_not_configured", "OpenRouter is not configured on this server.", 503
+                )
+            status, body = await request_json(
+                self.http,
+                "GET",
+                f"{self.openrouter_base_url}/models",
+                headers=self.openrouter_headers,
                 timeout=10,
             )
         else:
@@ -197,6 +221,17 @@ class Providers:
                 vision = vision or bool(multimodal.get("vision") or multimodal.get("image"))
             elif multimodal is True:
                 vision = True
+            if provider == "openrouter":
+                # Hundreds of models: offer only ones that can read photos and return the JSON
+                # contract, and skip routing variants such as ":batch" or ":free".
+                parameters = item.get("supported_parameters", [])
+                if (
+                    not vision
+                    or ":" in identifier
+                    or not isinstance(parameters, list)
+                    or "structured_outputs" not in parameters
+                ):
+                    continue
             models.append(
                 {
                     "id": identifier,
@@ -204,6 +239,8 @@ class Providers:
                     "input_modalities": ["text", "image"] if vision else ["text"],
                 }
             )
+        if provider == "openrouter":
+            models.sort(key=lambda model: str(model["name"]).lower())
         return models
 
     async def generate(
@@ -220,8 +257,30 @@ class Providers:
             async with asyncio.timeout(self.generation_timeout):
                 if provider == "chatgpt":
                     return await self._chatgpt(model, request, instructions, schema, schema_name)
-                return await self._llama(
-                    base_url, model, request, instructions, schema, schema_name
+                if provider == "openrouter":
+                    if not self.openrouter_headers:
+                        raise ProviderError(
+                            "provider_not_configured",
+                            "OpenRouter is not configured on this server.",
+                            503,
+                        )
+                    return await self._compatible(
+                        self.openrouter_base_url,
+                        self.openrouter_headers,
+                        model,
+                        request,
+                        instructions,
+                        schema,
+                        schema_name,
+                    )
+                return await self._compatible(
+                    base_url,
+                    self.llama_headers,
+                    model,
+                    request,
+                    instructions,
+                    schema,
+                    schema_name,
                 )
         except TimeoutError as exc:
             raise ProviderError(
@@ -305,9 +364,10 @@ class Providers:
             )
         return "".join(chunks)
 
-    async def _llama(
+    async def _compatible(
         self,
         base_url: str,
+        headers: dict[str, str],
         model: str,
         request: AIInput,
         instructions: str,
@@ -324,7 +384,7 @@ class Providers:
             "POST",
             f"{base_url}/chat/completions",
             timeout=self.generation_timeout,
-            headers=self.llama_headers,
+            headers=headers,
             json={
                 "model": model,
                 "messages": [
@@ -361,5 +421,5 @@ class Providers:
             return text
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ProviderError(
-                "incomplete_response", "The local model did not finish a valid reply."
+                "incomplete_response", "The model did not finish a valid reply."
             ) from exc
