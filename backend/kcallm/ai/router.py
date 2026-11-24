@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 
+from ..demo import DemoConfig, RateLimiter, client_ip
 from .auth import ChatGPTAuth
 from .common import ProviderError, prepare_private_dir, read_private_json, write_private_json
 from .providers import Providers, normalize_base_url
@@ -78,7 +79,14 @@ class AIService:
         catalogue: Callable[[], list[dict[str, Any]]],
         private_dir: Path,
         http: httpx.AsyncClient | None = None,
+        demo: DemoConfig | None = None,
     ) -> None:
+        if demo and not demo.model:
+            raise ValueError("KCALLM_DEMO_MODEL is required when KCALLM_DEMO=1.")
+        self.demo = demo
+        self.limiter = (
+            RateLimiter(demo.ai_per_ip_per_hour, demo.ai_global_per_day) if demo else None
+        )
         prepare_private_dir(private_dir)
         self.catalogue = catalogue
         self.config_path = private_dir / "ai-settings.json"
@@ -104,21 +112,37 @@ class AIService:
                 "KCALLM_AI_TIMEOUT_SECONDS must be a number between 30 and 600.",
                 503,
             ) from exc
+        openrouter_key = os.getenv("KCALLM_OPENROUTER_API_KEY", "")
+        self.openrouter_enabled = bool(openrouter_key)
+        self.openrouter_model = os.getenv("KCALLM_OPENROUTER_MODEL", "openai/gpt-6-luna")
         self.providers = Providers(
             self.http,
             self.auth,
             os.getenv("KCALLM_LLAMA_API_KEY", ""),
             generation_timeout=generation_timeout,
+            openrouter_key=openrouter_key,
         )
         self.settings_lock = asyncio.Lock()
 
     def settings(self) -> dict[str, Any]:
+        if self.demo:
+            # The demo is pinned to one hosted model; saved settings and ChatGPT are ignored.
+            return {
+                "provider": "llama",
+                "models": {"chatgpt": "", "llama": self.demo.model},
+                "llama_base_url": normalize_base_url(
+                    os.getenv("KCALLM_LLAMA_BASE_URL", "http://127.0.0.1:8080/v1")
+                ),
+            }
         saved = read_private_json(self.config_path)
+        # With an OpenRouter key on the server, a fresh install works out of the box.
+        default_provider = "openrouter" if self.openrouter_enabled else "chatgpt"
         return {
-            "provider": saved.get("provider", "chatgpt"),
+            "provider": saved.get("provider", default_provider),
             "models": {
                 "chatgpt": "",
                 "llama": "qwen-3.8-27b-vision-48k",
+                "openrouter": self.openrouter_model,
                 **saved.get("models", {}),
             },
             "llama_base_url": normalize_base_url(
@@ -130,6 +154,15 @@ class AIService:
 
     async def status(self) -> dict[str, Any]:
         settings = self.settings()
+        if self.demo:
+            return {
+                "provider": "llama",
+                "model": self.demo.model,
+                "llama_base_url": "",
+                "providers": [{"id": "llama", "connected": True, "message": "Hosted demo model."}],
+                "auth_pending": False,
+                "demo": True,
+            }
         chatgpt_connected, chatgpt_message = self.auth.status()
         try:
             models = await self.providers.models("llama", settings["llama_base_url"])
@@ -151,11 +184,23 @@ class AIService:
             "providers": [
                 {"id": "chatgpt", "connected": chatgpt_connected, "message": chatgpt_message},
                 {"id": "llama", "connected": llama_connected, "message": llama_message},
+                {
+                    "id": "openrouter",
+                    "connected": self.openrouter_enabled,
+                    "message": (
+                        "Hosted models through OpenRouter, using this server's API key."
+                        if self.openrouter_enabled
+                        else "Not configured: set KCALLM_OPENROUTER_API_KEY on the server."
+                    ),
+                },
             ],
             "auth_pending": self.auth.pending is not None,
+            "demo": False,
         }
 
     async def update_settings(self, value: AISettingsInput) -> dict[str, Any]:
+        if self.demo:
+            raise ProviderError("demo_locked", "AI settings are fixed in the public demo.", 403)
         async with self.settings_lock:
             settings = self.settings()
             settings["provider"] = value.provider
@@ -170,7 +215,14 @@ class AIService:
         if not request.text.strip() and request.image_data_url is None:
             raise ProviderError("empty_input", "Enter text or attach a photo.", 422)
         settings = self.settings()
+        if self.demo:
+            # Ignore any provider/model the browser asks for: the demo uses only its hosted model.
+            return "llama", self.demo.model, settings["llama_base_url"]
         provider = request.provider or settings["provider"]
+        if provider == "openrouter" and not self.openrouter_enabled:
+            raise ProviderError(
+                "provider_not_configured", "OpenRouter is not configured on this server.", 503
+            )
         model = request.model.strip() if request.model else settings["models"][provider]
         if not model:
             raise ProviderError("model_required", "Choose a model in AI settings first.", 422)
@@ -217,8 +269,24 @@ class AIService:
         await self.http.aclose()
 
 
-def create_ai_router(catalogue: Callable[[], list[dict[str, Any]]], private_dir: Path) -> APIRouter:
-    service = AIService(catalogue, private_dir)
+def create_ai_router(
+    catalogue: Callable[[], list[dict[str, Any]]],
+    private_dir: Path,
+    demo: DemoConfig | None = None,
+) -> APIRouter:
+    service = AIService(catalogue, private_dir, demo=demo)
+
+    def guard_demo(http_request: Request) -> None:
+        if service.limiter:
+            refusal = service.limiter.check(client_ip(http_request))
+            if refusal:
+                raise api_error(ProviderError("demo_rate_limited", refusal, 429))
+
+    def refuse_chatgpt_in_demo() -> None:
+        if service.demo:
+            raise api_error(
+                ProviderError("demo_locked", "ChatGPT sign-in is disabled in the public demo.", 403)
+            )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -236,6 +304,9 @@ def create_ai_router(catalogue: Callable[[], list[dict[str, Any]]], private_dir:
 
     @router.get("/models")
     async def models(provider: Annotated[Provider, Query()]) -> dict[str, Any]:
+        if service.demo:
+            model = service.demo.model
+            return {"models": [{"id": model, "name": model, "input_modalities": ["text", "image"]}]}
         try:
             return {
                 "models": await service.providers.models(
@@ -257,7 +328,8 @@ def create_ai_router(catalogue: Callable[[], list[dict[str, Any]]], private_dir:
             raise api_error(exc) from exc
 
     @router.post("/interpret")
-    async def interpret(request: AIInput) -> dict[str, Any]:
+    async def interpret(request: AIInput, http_request: Request) -> dict[str, Any]:
+        guard_demo(http_request)
         try:
             return await service.interpret(request)
         except ProviderError as exc:
@@ -271,7 +343,8 @@ def create_ai_router(catalogue: Callable[[], list[dict[str, Any]]], private_dir:
             ) from exc
 
     @router.post("/extract-food")
-    async def extract(request: AIInput) -> dict[str, Any]:
+    async def extract(request: AIInput, http_request: Request) -> dict[str, Any]:
+        guard_demo(http_request)
         try:
             return await service.extract(request)
         except ProviderError as exc:
@@ -285,6 +358,7 @@ def create_ai_router(catalogue: Callable[[], list[dict[str, Any]]], private_dir:
 
     @router.post("/chatgpt/connect")
     async def connect() -> dict[str, str]:
+        refuse_chatgpt_in_demo()
         try:
             return await service.auth.connect()
         except ProviderError as exc:
@@ -292,6 +366,7 @@ def create_ai_router(catalogue: Callable[[], list[dict[str, Any]]], private_dir:
 
     @router.post("/chatgpt/disconnect")
     async def disconnect() -> dict[str, Any]:
+        refuse_chatgpt_in_demo()
         try:
             await service.auth.disconnect()
             return await service.status()

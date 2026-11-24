@@ -1076,3 +1076,103 @@ def test_visual_suggestions_cannot_escape_whitelist(foods: list[dict[str, Any]])
     with pytest.raises(ProviderError) as error:
         validate_interpretation(proposal(candidates=["invented-potato"]), foods)
     assert error.value.code == "unknown_food"
+
+
+def openrouter_catalogue() -> dict[str, Any]:
+    def model(identifier: str, name: str, image: bool, structured: bool) -> dict[str, Any]:
+        parameters = ["temperature", "structured_outputs"] if structured else ["temperature"]
+        return {
+            "id": identifier,
+            "name": name,
+            "architecture": {"input_modalities": ["text", "image"] if image else ["text"]},
+            "supported_parameters": parameters,
+        }
+
+    return {
+        "data": [
+            model("zeta/vision", "Zeta Vision", True, True),
+            model("text/only", "Text Only", False, True),
+            model("no/schema", "No Schema", True, False),
+            model("alpha/vision", "Alpha Vision", True, True),
+            model("alpha/vision:batch", "Alpha Vision (batch)", True, True),
+        ]
+    }
+
+
+def mock_http(handler: Any) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_openrouter_is_default_and_lists_only_usable_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KCALLM_OPENROUTER_API_KEY", "or-test-key")
+    monkeypatch.setenv("KCALLM_OPENROUTER_MODEL", "zeta/vision")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=openrouter_catalogue())
+
+    service = AIService(lambda: [], tmp_path, mock_http(handler))
+    settings = service.settings()
+    assert settings["provider"] == "openrouter"
+    assert settings["models"]["openrouter"] == "zeta/vision"
+
+    models = await service.providers.models("openrouter", settings["llama_base_url"])
+    # Photo-capable, structured-output models only, no routing variants, sorted by name.
+    assert [item["id"] for item in models] == ["alpha/vision", "zeta/vision"]
+    assert str(seen[0].url) == "https://openrouter.ai/api/v1/models"
+    assert seen[0].headers["Authorization"] == "Bearer or-test-key"
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_openrouter_key_never_goes_to_the_custom_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foods: list[dict[str, Any]]
+) -> None:
+    monkeypatch.setenv("KCALLM_OPENROUTER_API_KEY", "or-secret")
+    monkeypatch.delenv("KCALLM_LLAMA_API_KEY", raising=False)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(
+            200, json={"choices": [{"finish_reason": "stop", "message": {"content": proposal()}}]}
+        )
+
+    service = AIService(lambda: foods, tmp_path, mock_http(handler))
+    await service.update_settings(
+        AISettingsInput(provider="llama", model="local", llama_base_url="https://example.test/v1")
+    )
+    seen.clear()  # Saving settings refreshes provider status; only the generations matter here.
+    await service.interpret(AIInput(text="banana", provider="llama", model="local"))
+    await service.interpret(AIInput(text="banana", provider="openrouter", model="alpha/vision"))
+
+    custom, hosted = seen
+    assert custom.url.host == "example.test"
+    assert "Authorization" not in custom.headers
+    assert str(hosted.url) == "https://openrouter.ai/api/v1/chat/completions"
+    assert hosted.headers["Authorization"] == "Bearer or-secret"
+    assert json.loads(hosted.content)["model"] == "alpha/vision"
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_without_a_key_openrouter_is_listed_but_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("KCALLM_OPENROUTER_API_KEY", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"No request expected, got {request.url}")
+
+    service = AIService(lambda: [], tmp_path, mock_http(handler))
+    assert service.settings()["provider"] == "chatgpt"  # Existing installs keep their default.
+    with pytest.raises(ProviderError) as refused:
+        service.resolve(AIInput(text="banana", provider="openrouter", model="any/model"))
+    assert refused.value.code == "provider_not_configured"
+    await service.close()

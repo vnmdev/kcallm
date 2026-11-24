@@ -22,6 +22,7 @@ from .models import (
     Food,
     FoodInput,
     FoodUpdate,
+    Nutrients,
     Preview,
     PreviewLine,
     PreviewRequest,
@@ -500,6 +501,20 @@ class Store:
                 "UPDATE settings SET data = ? WHERE singleton = 1", (settings.model_dump_json(),)
             )
         return counts
+
+    def reset_to_seed(self, foods: list[FoodInput], goals: Nutrients) -> None:
+        """Replace all data with a fresh catalogue. Used only by the public demo."""
+        with self.connection(write=True) as connection:
+            settings_revision = self._settings(connection).revision
+            connection.execute("DELETE FROM entries")
+            connection.execute("DELETE FROM foods")
+            connection.execute("DELETE FROM receipts")
+            for data in foods:
+                self._put_food(connection, Food(**data.model_dump(), id=str(uuid4()), revision=1))
+            settings = Settings(revision=settings_revision + 1, goals=goals)
+            connection.execute(
+                "UPDATE settings SET data = ? WHERE singleton = 1", (settings.model_dump_json(),)
+            )
 
     def catalogue_json(self) -> list[dict[str, Any]]:
         return [food.model_dump(mode="json") for food in self.foods()]

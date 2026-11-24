@@ -20,6 +20,7 @@ import {
   type AIStatus,
   type Provider,
   type Settings,
+  providerLabels,
 } from "../types";
 
 type Props = {
@@ -221,7 +222,16 @@ export default function SettingsPage({
 
   const chatgpt = ai.providers.find((item) => item.id === "chatgpt");
   const llama = ai.providers.find((item) => item.id === "llama");
+  const openrouter = ai.providers.find((item) => item.id === "openrouter");
   const selectedModel = models.find((item) => item.id === model);
+  // OpenRouter offers many models: typing in the Model box narrows the list below it.
+  const query = model.trim().toLowerCase();
+  const visibleModels =
+    query && !selectedModel
+      ? models.filter((item) =>
+          `${item.id} ${item.name}`.toLowerCase().includes(query),
+        )
+      : models;
 
   return (
     <div className="settings-page">
@@ -312,188 +322,231 @@ export default function SettingsPage({
             AI proposes foods and quantities. Your catalogue supplies the
             nutrition. Manual logging works without a model.
           </p>
-          <div className="connection-cards">
-            <div className="connection-card">
-              <div className="connection-card-heading">
-                <span className="provider-monogram">C</span>
-                <strong>ChatGPT</strong>
-                <span
-                  className={`connection-chip ${chatgpt?.connected ? "connected" : ""}`}
-                >
-                  {chatgpt?.connected
-                    ? "Connected"
-                    : ai.auth_pending
-                      ? "Awaiting sign-in"
-                      : "Not connected"}
-                </span>
+          {ai.demo ? (
+            <p className="section-copy">
+              This public demo uses one hosted vision model ({ai.model}) with
+              per-visitor limits, so these settings are fixed. The full app uses
+              OpenRouter, a ChatGPT account or your own llama.cpp server.
+            </p>
+          ) : (
+            <>
+              <div className="connection-cards">
+                <div className="connection-card">
+                  <div className="connection-card-heading">
+                    <span className="provider-monogram">O</span>
+                    <strong>OpenRouter</strong>
+                    <span
+                      className={`connection-chip ${openrouter?.connected ? "connected" : ""}`}
+                    >
+                      {openrouter?.connected ? "Ready" : "Not configured"}
+                    </span>
+                  </div>
+                  <p>
+                    {openrouter?.message ||
+                      "Hosted models through OpenRouter, using this server's API key."}
+                  </p>
+                </div>
+                <div className="connection-card">
+                  <div className="connection-card-heading">
+                    <span className="provider-monogram">C</span>
+                    <strong>ChatGPT</strong>
+                    <span
+                      className={`connection-chip ${chatgpt?.connected ? "connected" : ""}`}
+                    >
+                      {chatgpt?.connected
+                        ? "Connected"
+                        : ai.auth_pending
+                          ? "Awaiting sign-in"
+                          : "Not connected"}
+                    </span>
+                  </div>
+                  <p>
+                    {chatgpt?.message ||
+                      "Connect an eligible ChatGPT account using the documented sign-in flow."}
+                  </p>
+                  <div className="connection-actions">
+                    <button
+                      className="button button-secondary"
+                      onClick={() => void connect()}
+                      disabled={Boolean(busy)}
+                    >
+                      {busy === "connect" ? (
+                        <Busy />
+                      ) : (
+                        <>
+                          <Link2 size={15} />
+                          {chatgpt?.connected ? "Reconnect" : "Connect ChatGPT"}
+                        </>
+                      )}
+                    </button>
+                    {chatgpt?.connected && (
+                      <button
+                        className="text-button"
+                        onClick={() => void disconnect()}
+                        disabled={Boolean(busy)}
+                      >
+                        <Unplug size={14} />
+                        Disconnect
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-              <p>
-                {chatgpt?.message ||
-                  "Connect an eligible ChatGPT account using the documented sign-in flow."}
-              </p>
-              <div className="connection-actions">
+              <details
+                className="advanced-provider"
+                open={provider === "llama"}
+              >
+                <summary>Advanced: use your own model server</summary>
+                <div className="connection-card">
+                  <div className="connection-card-heading">
+                    <span className="provider-monogram llama-monogram">L</span>
+                    <strong>{providerLabels.llama}</strong>
+                    <span
+                      className={`connection-chip ${llama?.connected ? "connected" : ""}`}
+                    >
+                      {llama?.connected ? "Configured" : "Not ready"}
+                    </span>
+                  </div>
+                  <p>
+                    {llama?.message ||
+                      "Use your own OpenAI-compatible llama.cpp endpoint. Image support depends on its loaded model."}
+                  </p>
+                </div>
+                <label>
+                  Endpoint base URL
+                  <input
+                    type="url"
+                    value={endpoint}
+                    onChange={(event) => {
+                      setEndpoint(event.target.value);
+                      setAIDirty(true);
+                    }}
+                    placeholder="http://127.0.0.1:8080/v1"
+                  />
+                  <span className="field-hint">
+                    Save a changed endpoint before loading its models. API keys
+                    are configured privately on the host.
+                  </span>
+                </label>
+              </details>
+              <div className="form-stack">
+                <label>
+                  Default provider
+                  <select
+                    value={provider}
+                    onChange={(event) => {
+                      setProvider(event.target.value as Provider);
+                      setModel("");
+                      setModels([]);
+                      setModelsLoaded(false);
+                      setAIDirty(true);
+                    }}
+                  >
+                    {(Object.keys(providerLabels) as Provider[]).map((id) => (
+                      <option
+                        key={id}
+                        value={id}
+                        disabled={id === "openrouter" && !openrouter?.connected}
+                      >
+                        {providerLabels[id]}
+                        {id === "openrouter" && !openrouter?.connected
+                          ? " (not configured)"
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="model-discovery">
+                  <label>
+                    Model
+                    <input
+                      value={model}
+                      onChange={(event) => {
+                        setModel(event.target.value);
+                        setAIDirty(true);
+                      }}
+                      placeholder="Choose an available model"
+                      list="provider-models"
+                    />
+                    <datalist id="provider-models">
+                      {models.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </datalist>
+                  </label>
+                  <button
+                    className="button button-secondary"
+                    disabled={Boolean(busy)}
+                    onClick={() => void discoverModels()}
+                  >
+                    {busy === "models" ? (
+                      <LoaderCircle className="spin" size={16} />
+                    ) : (
+                      <RefreshCw size={16} />
+                    )}
+                    Load models
+                  </button>
+                </div>
+                {modelsLoaded &&
+                  (visibleModels.length ? (
+                    <div className="model-options">
+                      {visibleModels.map((item) => (
+                        <button
+                          key={item.id}
+                          className={`model-option ${model === item.id ? "selected" : ""}`}
+                          onClick={() => {
+                            setModel(item.id);
+                            setAIDirty(true);
+                          }}
+                        >
+                          <span>
+                            {item.name || item.id}
+                            <small>
+                              {item.input_modalities?.includes("image")
+                                ? "Text + images advertised"
+                                : "Image support not advertised"}
+                            </small>
+                          </span>
+                          <ChevronRight size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="field-hint">
+                      {models.length
+                        ? "No loaded model matches that name."
+                        : "The provider returned no available models."}
+                    </p>
+                  ))}
+                {selectedModel && (
+                  <p className="field-hint">
+                    Capability metadata is a hint; a real photo request still
+                    needs to succeed.
+                  </p>
+                )}
                 <button
-                  className="button button-secondary"
-                  onClick={() => void connect()}
-                  disabled={Boolean(busy)}
+                  className="button button-primary"
+                  disabled={Boolean(busy) || !aiDirty}
+                  onClick={() => void saveAI()}
                 >
-                  {busy === "connect" ? (
+                  {busy === "ai" ? (
                     <Busy />
                   ) : (
                     <>
-                      <Link2 size={15} />
-                      {chatgpt?.connected ? "Reconnect" : "Connect ChatGPT"}
+                      <Check size={16} />
+                      Save AI settings
                     </>
                   )}
                 </button>
-                {chatgpt?.connected && (
-                  <button
-                    className="text-button"
-                    onClick={() => void disconnect()}
-                    disabled={Boolean(busy)}
-                  >
-                    <Unplug size={14} />
-                    Disconnect
-                  </button>
-                )}
               </div>
-            </div>
-            <div className="connection-card">
-              <div className="connection-card-heading">
-                <span className="provider-monogram llama-monogram">L</span>
-                <strong>llama.cpp</strong>
-                <span
-                  className={`connection-chip ${llama?.connected ? "connected" : ""}`}
-                >
-                  {llama?.connected ? "Configured" : "Not ready"}
-                </span>
-              </div>
-              <p>
-                {llama?.message ||
-                  "Use your own OpenAI-compatible llama.cpp endpoint. Image support depends on its loaded model."}
+              <p className="privacy-note">
+                <ShieldCheck size={14} />
+                No automatic provider switch or paid API fallback.
               </p>
-            </div>
-          </div>
-          <div className="form-stack">
-            <label>
-              Default provider
-              <select
-                value={provider}
-                onChange={(event) => {
-                  setProvider(event.target.value as Provider);
-                  setModel("");
-                  setModels([]);
-                  setModelsLoaded(false);
-                  setAIDirty(true);
-                }}
-              >
-                <option value="chatgpt">ChatGPT</option>
-                <option value="llama">llama.cpp</option>
-              </select>
-            </label>
-            <label>
-              llama.cpp base URL
-              <input
-                type="url"
-                value={endpoint}
-                onChange={(event) => {
-                  setEndpoint(event.target.value);
-                  setAIDirty(true);
-                }}
-                placeholder="http://127.0.0.1:8080/v1"
-              />
-              <span className="field-hint">
-                Save a changed endpoint before loading its models. API keys are
-                configured privately on the host.
-              </span>
-            </label>
-            <div className="model-discovery">
-              <label>
-                Model
-                <input
-                  value={model}
-                  onChange={(event) => {
-                    setModel(event.target.value);
-                    setAIDirty(true);
-                  }}
-                  placeholder="Choose an available model"
-                  list="provider-models"
-                />
-                <datalist id="provider-models">
-                  {models.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </datalist>
-              </label>
-              <button
-                className="button button-secondary"
-                disabled={Boolean(busy)}
-                onClick={() => void discoverModels()}
-              >
-                {busy === "models" ? (
-                  <LoaderCircle className="spin" size={16} />
-                ) : (
-                  <RefreshCw size={16} />
-                )}
-                Load models
-              </button>
-            </div>
-            {modelsLoaded &&
-              (models.length ? (
-                <div className="model-options">
-                  {models.map((item) => (
-                    <button
-                      key={item.id}
-                      className={`model-option ${model === item.id ? "selected" : ""}`}
-                      onClick={() => {
-                        setModel(item.id);
-                        setAIDirty(true);
-                      }}
-                    >
-                      <span>
-                        {item.name || item.id}
-                        <small>
-                          {item.input_modalities?.includes("image")
-                            ? "Text + images advertised"
-                            : "Image support not advertised"}
-                        </small>
-                      </span>
-                      <ChevronRight size={14} />
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="field-hint">
-                  The provider returned no available models.
-                </p>
-              ))}
-            {selectedModel && (
-              <p className="field-hint">
-                Capability metadata is a hint; a real photo request still needs
-                to succeed.
-              </p>
-            )}
-            <button
-              className="button button-primary"
-              disabled={Boolean(busy) || !aiDirty}
-              onClick={() => void saveAI()}
-            >
-              {busy === "ai" ? (
-                <Busy />
-              ) : (
-                <>
-                  <Check size={16} />
-                  Save AI settings
-                </>
-              )}
-            </button>
-          </div>
-          <p className="privacy-note">
-            <ShieldCheck size={14} />
-            No automatic provider switch or paid API fallback.
-          </p>
+            </>
+          )}
         </section>
       </div>
 
@@ -535,6 +588,7 @@ export default function SettingsPage({
           />
           <button
             className="button button-quiet"
+            hidden={ai.demo}
             disabled={Boolean(busy)}
             onClick={() => restoreInput.current?.click()}
           >
@@ -552,11 +606,13 @@ export default function SettingsPage({
       <div className="settings-footnote">
         <ShieldCheck size={20} />
         <p>
-          <strong>A private, connected app.</strong>
+          <strong>
+            {ai.demo ? "A public demo." : "A private, connected app."}
+          </strong>
           <span>
-            Your database lives on your host. A backend connection is required
-            to save; an unsaved capture stays in this browser until you confirm
-            or cancel.
+            {ai.demo
+              ? "Synthetic data that resets every hour. Restoring backups is disabled; exports still work."
+              : "Your database lives on your host. A backend connection is required to save; an unsaved capture stays in this browser until you confirm or cancel."}
           </span>
         </p>
       </div>

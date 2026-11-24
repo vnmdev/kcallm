@@ -29,3 +29,9 @@ deploy/tailscale/
 # Build output
 frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Claude Code worktrees and local agent state
+.claude/
+deploy/aws/cdk.out/
+deploy/aws/cdk.context.json
+deploy/aws/cdk-outputs.json

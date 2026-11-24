@@ -28,7 +28,7 @@ Manual logging works without any AI provider.
 | --- | --- |
 | Backend | Python 3.13, FastAPI, Pydantic, SQLite, httpx |
 | Frontend | React, TypeScript, Vite |
-| AI providers | ChatGPT (account sign-in) or any OpenAI-compatible llama.cpp server |
+| AI providers | OpenRouter (hosted models), ChatGPT (account sign-in) or any OpenAI-compatible llama.cpp server |
 | Testing | pytest, Playwright, Ruff, mypy (strict) |
 | Deployment | Docker |
 
@@ -49,8 +49,9 @@ For configuration, copy `.env.example` to `.env` and run with `uv run --env-file
 
 ## AI providers
 
+- **OpenRouter:** set `KCALLM_OPENROUTER_API_KEY` and it becomes the default, with `KCALLM_OPENROUTER_MODEL` preselected (default `openai/gpt-6-luna`). Settings lists only models that accept photos and support structured output. The key is only ever sent to OpenRouter.
 - **ChatGPT:** connect through Settings using the account sign-in flow, then choose a model. No API key is stored, and the app never switches to paid usage on its own.
-- **llama.cpp:** set `KCALLM_LLAMA_BASE_URL` to an OpenAI-compatible endpoint, for example `http://127.0.0.1:8080/v1`.
+- **Custom endpoint (llama.cpp):** set `KCALLM_LLAMA_BASE_URL` to an OpenAI-compatible endpoint, for example `http://127.0.0.1:8080/v1`. In Settings it sits under "Advanced".
 
 Providers receive the text or photo plus a compact list of catalogue names and units. Existing nutrition facts and diary history are not sent.
 

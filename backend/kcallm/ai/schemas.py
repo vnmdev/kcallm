@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from .common import ProviderError
 
-Provider = Literal["chatgpt", "llama"]
+Provider = Literal["chatgpt", "llama", "openrouter"]
 NUTRIENTS = ("kcal", "protein", "carbohydrates", "fat", "saturates", "sugars", "fibre", "salt")
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 DECIMAL_PATTERN = r"^[0-9]+(?:\.[0-9]+)?$"

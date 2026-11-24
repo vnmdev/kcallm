@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from .calculation import CalculationError
+from .demo import DemoConfig, DemoResetter, demo_enabled
 from .models import (
     ConfirmRequest,
     Day,
@@ -75,6 +76,14 @@ def create_app(data_dir: Path | None = None, include_ai: bool = True) -> FastAPI
             allowed_hosts.add(hostname(host))
     application = FastAPI(title="KcaLLM", version="0.1.0")
     application.state.store = store
+    demo_config = DemoConfig.from_env(PROJECT_ROOT) if demo_enabled() else None
+    resetter = DemoResetter(store, demo_config) if demo_config else None
+    if resetter:
+        resetter.reset()
+
+    def refuse_in_demo(action: str) -> None:
+        if demo_config:
+            raise DomainError("demo_locked", f"{action} is disabled in the public demo.", 403)
 
     @application.middleware("http")
     async def guard_origin(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -107,6 +116,8 @@ def create_app(data_dir: Path | None = None, include_ai: bool = True) -> FastAPI
                         }
                     },
                 )
+        if resetter and request.url.path.startswith("/api/"):
+            resetter.maybe_reset()
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
@@ -215,16 +226,30 @@ def create_app(data_dir: Path | None = None, include_ai: bool = True) -> FastAPI
     def export() -> ExportData:
         return store.export()
 
+    @application.get("/api/demo")
+    def demo_info() -> dict[str, Any]:
+        if not demo_config:
+            return {"demo": False}
+        return {
+            "demo": True,
+            "reset_minutes": demo_config.reset_minutes,
+            "ai_per_hour": demo_config.ai_per_ip_per_hour,
+        }
+
     @application.post("/api/restore/preview")
     def restore_preview(data: RestorePreviewRequest) -> dict[str, int]:
+        refuse_in_demo("Restoring a backup")
         return store.validate_restore(data.data)
 
     @application.post("/api/restore")
     def restore(data: RestoreRequest) -> dict[str, int]:
+        refuse_in_demo("Restoring a backup")
         return store.restore(data.data)
 
     @application.get("/api/starter-drafts")
     def starter_drafts() -> list[dict[str, Any]]:
+        if demo_config:
+            return []
         path = Path(os.getenv("KCALLM_STARTER_FILE", str(private_dir / "starter-drafts.json")))
         if not path.exists():
             return []
@@ -241,7 +266,9 @@ def create_app(data_dir: Path | None = None, include_ai: bool = True) -> FastAPI
     if include_ai:
         from .ai import create_ai_router
 
-        application.include_router(create_ai_router(store.catalogue_json, private_dir))
+        application.include_router(
+            create_ai_router(store.catalogue_json, private_dir, demo=demo_config)
+        )
 
     dist = Path(os.getenv("KCALLM_FRONTEND_DIR", str(PROJECT_ROOT / "frontend" / "dist")))
     if dist.is_dir():

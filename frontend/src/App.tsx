@@ -199,6 +199,22 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {ai.demo && (
+          <div className="demo-banner" role="note">
+            <strong>Public demo</strong>
+            <span>
+              Synthetic food data that resets every hour. AI requests are
+              limited per visitor.
+            </span>
+            <a
+              href="https://github.com/vnmdev/kcallm"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Source on GitHub
+            </a>
+          </div>
+        )}
         <header className="topbar">
           <span className="breadcrumb">
             {tab === "today"
