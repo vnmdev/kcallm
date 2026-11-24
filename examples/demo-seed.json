@@ -1,6 +1,14 @@
 {
   "_note": "Synthetic demo catalogue with approximate typical values. Not verified nutrition.",
   "goals": {"kcal": "2200", "protein": "150", "carbohydrates": "250", "fat": "70"},
+  "diary": [
+    {"food": "Rolled oats", "quantity": "40", "unit": "g"},
+    {"food": "Semi-skimmed milk", "quantity": "200", "unit": "ml"},
+    {"food": "Banana", "quantity": "1", "unit": "banana"},
+    {"food": "Chicken breast", "quantity": "150", "unit": "g"},
+    {"food": "White rice", "quantity": "180", "unit": "g"},
+    {"food": "Greek yoghurt 0% fat", "quantity": "170", "unit": "g"}
+  ],
   "foods": [
     {"name": "Banana", "brand": "Demo", "category": "Fruit", "preparation": "raw, peeled", "aliases": ["bananas"],
      "basis_amount": "100", "basis_unit": "g",

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,10 +31,29 @@ def demo_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_seed_file_is_valid_and_realistic() -> None:
-    foods, goals = load_seed(SEED)
+    foods, goals, diary = load_seed(SEED)
     assert len(foods) >= 10
     assert all(food.nutrients.kcal is not None for food in foods)
     assert goals.kcal is not None
+    assert diary, "the demo should open on a day with entries"
+
+
+def test_seed_rejects_diary_items_for_unknown_foods(tmp_path: Path) -> None:
+    seed = json.loads(SEED.read_text())
+    seed["diary"].append({"food": "Unicorn steak", "quantity": "1", "unit": "g"})
+    path = tmp_path / "seed.json"
+    path.write_text(json.dumps(seed))
+    with pytest.raises(ValueError, match="Unicorn steak"):
+        load_seed(path)
+
+
+def test_each_reset_starts_with_todays_diary_filled_in(demo_env: Path) -> None:
+    client = TestClient(create_app(demo_env / "data", include_ai=False))
+    today = datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+    day = client.get("/api/diary", params={"date": today}).json()
+    _, _, diary = load_seed(SEED)
+    assert len(day["entries"]) == len(diary)
+    assert int(float(day["totals"]["kcal"])) > 0
 
 
 def test_demo_starts_with_the_seed_catalogue_and_goals(demo_env: Path) -> None:

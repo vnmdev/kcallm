@@ -13,11 +13,15 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import Request
 
-from .models import FoodInput, Nutrients
+from .models import ConfirmRequest, FoodInput, Nutrients, ReviewedLine
 from .storage import Store
 
 DAY = 86_400.0
@@ -59,14 +63,33 @@ class DemoConfig:
         )
 
 
-def load_seed(path: Path) -> tuple[list[FoodInput], Nutrients]:
-    """Read a demo seed: either a list of foods, or {"goals": {...}, "foods": [...]}."""
+@dataclass(frozen=True)
+class DiarySeed:
+    food: str
+    quantity: str
+    unit: str
+
+
+def load_seed(path: Path) -> tuple[list[FoodInput], Nutrients, list[DiarySeed]]:
+    """Read a demo seed: a list of foods, or {"goals": {...}, "foods": [...], "diary": [...]}.
+
+    Diary items name a seeded food and an amount; they are logged for "today" on each reset
+    so the demo never opens on an empty day.
+    """
     data = json.loads(path.read_text())
     if isinstance(data, list):
         data = {"foods": data}
     foods = [FoodInput.model_validate(item) for item in data.get("foods", [])]
     goals = Nutrients.model_validate(data.get("goals", {}))
-    return foods, goals
+    names = {food.name for food in foods}
+    diary = [
+        DiarySeed(str(item["food"]), str(item["quantity"]), str(item["unit"]))
+        for item in data.get("diary", [])
+    ]
+    unknown = [item.food for item in diary if item.food not in names]
+    if unknown:
+        raise ValueError(f"Demo diary refers to foods not in the seed: {', '.join(unknown)}")
+    return foods, goals, diary
 
 
 class DemoResetter:
@@ -77,15 +100,36 @@ class DemoResetter:
     ) -> None:
         self.store = store
         self.interval = config.reset_minutes * 60
-        self.foods, self.goals = load_seed(config.seed_path)
+        self.foods, self.goals, self.diary = load_seed(config.seed_path)
         self.clock = clock
         self.last_reset: float | None = None
         self.lock = threading.Lock()
 
+    def _reset_now(self) -> None:
+        self.store.reset_to_seed(self.foods, self.goals)
+        if self.diary:
+            by_name = {food.name: food for food in self.store.foods()}
+            today = datetime.now(ZoneInfo(self.store.settings().timezone)).date()
+            self.store.confirm(
+                ConfirmRequest(
+                    request_id=uuid4(),
+                    date=today,
+                    items=[
+                        ReviewedLine(
+                            food_id=by_name[item.food].id,
+                            food_revision=by_name[item.food].revision,
+                            quantity=Decimal(item.quantity),
+                            unit=item.unit,
+                        )
+                        for item in self.diary
+                    ],
+                )
+            )
+        self.last_reset = self.clock()
+
     def reset(self) -> None:
         with self.lock:
-            self.store.reset_to_seed(self.foods, self.goals)
-            self.last_reset = self.clock()
+            self._reset_now()
 
     def maybe_reset(self) -> None:
         if self.last_reset is not None and self.clock() - self.last_reset < self.interval:
@@ -94,8 +138,7 @@ class DemoResetter:
             # Another request may have reset while this one waited for the lock.
             if self.last_reset is not None and self.clock() - self.last_reset < self.interval:
                 return
-            self.store.reset_to_seed(self.foods, self.goals)
-            self.last_reset = self.clock()
+            self._reset_now()
 
 
 class RateLimiter:
