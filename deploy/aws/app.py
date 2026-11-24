@@ -1,10 +1,11 @@
-"""AWS CDK app for the public KcaLLM demo at kcallm.vnmdev.com.
+"""AWS CDK app for KcaLLM: the public demo and a private copy behind Google sign-in.
 
-One small ARM EC2 instance in the default VPC runs two containers: Caddy (automatic
-HTTPS) and the app in demo mode. There is no SSH port; administration uses SSM. The
-image is built locally and pushed to ECR by `cdk deploy`. The model's API key lives
-in SSM Parameter Store as a SecureString (/kcallm/demo/api-key) and is created by
-hand, so it never appears in this code or the CloudFormation template.
+One small ARM EC2 instance in the default VPC runs Caddy (automatic HTTPS), the app in
+demo mode (kcallm.vnmdev.com) and, once its secrets exist, a private app behind
+oauth2-proxy (app.vnmdev.com) with nightly SQLite backups to S3. There is no SSH port;
+administration uses SSM. The image is built locally and pushed to ECR by `cdk deploy`.
+Secrets (API keys, the Google client secret) and the allowed email live in SSM Parameter
+Store and are created by hand, so they never appear in this code or the template.
 """
 
 from __future__ import annotations
@@ -12,15 +13,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from aws_cdk import App, CfnOutput, Environment, Stack
+from aws_cdk import App, CfnOutput, Duration, Environment, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr_assets as ecr_assets
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_s3_assets as s3_assets
 from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "/kcallm/demo"
+PRIVATE = "/kcallm/private"
 
 
 class KcaLLMDemo(Stack):
@@ -30,6 +34,7 @@ class KcaLLMDemo(Stack):
         model = self.node.try_get_context("model")
         base_url = self.node.try_get_context("base_url") or "https://openrouter.ai/api/v1"
         instance_type = self.node.try_get_context("instance_type") or "t4g.micro"
+        private_domain = self.node.try_get_context("private_domain") or "app.vnmdev.com"
         if not model:
             raise ValueError("Set the hosted model: cdk deploy -c model=<provider/model-id>")
 
@@ -40,14 +45,45 @@ class KcaLLMDemo(Stack):
             file="deploy/Dockerfile",
             platform=ecr_assets.Platform.LINUX_ARM64,
         )
+        # Server logic, fetched by the instance on first boot and on every deploy.
+        update_script = s3_assets.Asset(
+            self, "UpdateScript", path=str(Path(__file__).parent / "update.sh")
+        )
+        # Private app backups: never public, kept 60 days, kept even if the stack is deleted.
+        backups = s3.Bucket(
+            self,
+            "Backups",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            removal_policy=RemovalPolicy.RETAIN,
+            lifecycle_rules=[s3.LifecycleRule(expiration=Duration.days(60))],
+        )
+
+        params = []
         for name, value in {
             "image-uri": image.image_uri,
             "model": model,
             "base-url": base_url,
             "domain": domain,
+            "update-script": update_script.s3_object_url,
         }.items():
-            ssm.StringParameter(
-                self, f"Param-{name}", parameter_name=f"{PREFIX}/{name}", string_value=value
+            params.append(
+                ssm.StringParameter(
+                    self, f"Param-{name}", parameter_name=f"{PREFIX}/{name}", string_value=value
+                )
+            )
+        for name, value in {
+            "domain": private_domain,
+            "backup-bucket": backups.bucket_name,
+        }.items():
+            params.append(
+                ssm.StringParameter(
+                    self,
+                    f"Private-{name}",
+                    parameter_name=f"{PRIVATE}/{name}",
+                    string_value=value,
+                )
             )
 
         vpc = ec2.Vpc.from_lookup(self, "DefaultVpc", is_default=True)
@@ -68,11 +104,14 @@ class KcaLLMDemo(Stack):
             ],
         )
         image.repository.grant_pull(role)
+        update_script.grant_read(role)
+        backups.grant_put(role)
         role.add_to_policy(
             iam.PolicyStatement(
                 actions=["ssm:GetParameter", "ssm:GetParameters"],
                 resources=[
-                    f"arn:aws:ssm:{self.region}:{self.account}:parameter{PREFIX}/*"
+                    f"arn:aws:ssm:{self.region}:{self.account}:parameter{prefix}/*"
+                    for prefix in (PREFIX, PRIVATE)
                 ],
             )
         )
@@ -110,6 +149,10 @@ class KcaLLMDemo(Stack):
                 )
             ],
         )
+        # First boot reads these, so make sure they exist before the instance starts.
+        for dependency in [*params, role]:
+            server.node.add_dependency(dependency)
+
         ip = ec2.CfnEIP(self, "PublicIp", domain="vpc")
         ec2.CfnEIPAssociation(
             self, "PublicIpAssociation", allocation_id=ip.attr_allocation_id,
@@ -119,6 +162,8 @@ class KcaLLMDemo(Stack):
         CfnOutput(self, "ElasticIp", value=ip.attr_public_ip)
         CfnOutput(self, "InstanceId", value=server.instance_id)
         CfnOutput(self, "Url", value=f"https://{domain}")
+        CfnOutput(self, "PrivateUrl", value=f"https://{private_domain}")
+        CfnOutput(self, "BackupBucket", value=backups.bucket_name)
 
 
 app = App()

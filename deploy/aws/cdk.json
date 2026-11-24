@@ -4,6 +4,7 @@
     "region": "eu-north-1",
     "domain": "kcallm.vnmdev.com",
     "base_url": "https://openrouter.ai/api/v1",
-    "instance_type": "t4g.micro"
+    "instance_type": "t4g.micro",
+    "private_domain": "app.vnmdev.com"
   }
 }
